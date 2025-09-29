@@ -47,6 +47,8 @@
 #include <framework/core/adaptiverenderer.h>
 #include <cmath>
 
+#include <algorithm>
+
 MapView::MapView()
 {
     m_lockedFirstVisibleFloor = -1;
@@ -162,10 +164,23 @@ void MapView::drawFloor(short floor, const Position& cameraPosition, const TileP
     auto& tiles = m_cachedVisibleTiles[floor];
     size_t lightFloorStart = m_lightView ? m_lightView->size() : 0;
 
+    std::vector<std::pair<TilePtr, Point>> drawList;
+    drawList.reserve(tiles.size());
+    for (auto& tile : tiles) {
+        drawList.emplace_back(tile, transformPositionTo2D(tile->getPosition(), cameraPosition));
+    }
+
+    // Sort tiles by projected screen-space Y so the isometric pipeline draws lower tiles last.
+    std::stable_sort(drawList.begin(), drawList.end(), [](const auto& a, const auto& b) {
+        return a.second.y < b.second.y;
+    });
+
     // light
     if (m_lightView) {
-        for (auto& tile : tiles) {
-            const Position& tilePosition = tile->getPosition();
+
+        for (const auto& entry : drawList) {
+            const TilePtr& tile = entry.first;
+            const Point& tileDrawPos = entry.second;
             ItemPtr ground = tile->getGround();
             if (ground && ground->isGround() && !ground->isTranslucent()) {
                 const Point tileIndex(
@@ -178,13 +193,15 @@ void MapView::drawFloor(short floor, const Position& cameraPosition, const TileP
 
     if (g_game.getFeature(Otc::GameMapDrawGroundFirst)) {
         // ground
-        for (auto& tile : tiles) {
-            Point tileDrawPos = transformPositionTo2D(tile->getPosition(), cameraPosition);
+        for (const auto& entry : drawList) {
+            const TilePtr& tile = entry.first;
+            const Point& tileDrawPos = entry.second;
             tile->drawGround(tileDrawPos, m_lightView.get());
         }
         // bottom, creatures, top
-        for (auto& tile : tiles) {
-            Point tileDrawPos = transformPositionTo2D(tile->getPosition(), cameraPosition);
+        for (const auto& entry : drawList) {
+            const TilePtr& tile = entry.first;
+            const Point& tileDrawPos = entry.second;
 
             tile->drawBottom(tileDrawPos, m_lightView.get());
 
@@ -198,9 +215,9 @@ void MapView::drawFloor(short floor, const Position& cameraPosition, const TileP
         }
     } else {
         // ground, bottom, creatures, top
-        for (auto& tile : tiles) {
-            const Position& tilePosition = tile->getPosition();
-            Point tileDrawPos = transformPositionTo2D(tilePosition, cameraPosition);
+        for (const auto& entry : drawList) {
+            const TilePtr& tile = entry.first;
+            const Point& tileDrawPos = entry.second;
 
             if (m_lightView) {
                 ItemPtr ground = tile->getGround();
@@ -260,6 +277,11 @@ void MapView::drawMapForeground(const Rect& rect)
         p += rect.topLeft();
         creatures.push_back(std::make_pair(creature, p));
     }
+
+    // Sort by screen-space Y so the isometric pipeline respects creature depth against terrain.
+    std::stable_sort(creatures.begin(), creatures.end(), [](const auto& a, const auto& b) {
+        return a.second.y < b.second.y;
+    });
 
     for (auto& c : creatures) {
         int flags = Otc::DrawIcons;
