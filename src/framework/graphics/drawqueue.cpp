@@ -252,12 +252,24 @@ void DrawQueueConditionMark::end(DrawQueue* queue)
     g_painter->resetShaderProgram();
 }
 
+
+void DrawQueueConditionComposition::start(DrawQueue*)
+{
+    m_prevMode = static_cast<int>(g_painter->getCompositionMode());
+    g_painter->setCompositionMode(static_cast<Painter::CompositionMode>(m_mode));
+}
+
+void DrawQueueConditionComposition::end(DrawQueue*)
+{
+    g_painter->setCompositionMode(static_cast<Painter::CompositionMode>(m_prevMode));
+
 void DrawQueue::addGroundShadow(const PointF& center, const SizeF& size, const Color& color)
 {
     if (size.width() <= 0.f || size.height() <= 0.f)
         return;
 
     m_queue.push_back(new DrawQueueItemGroundShadow(groundShadowCoords(), center, size, color));
+
 }
 
 void DrawQueue::setFrameBuffer(const Rect& dest, const Size& size, const Rect& src)

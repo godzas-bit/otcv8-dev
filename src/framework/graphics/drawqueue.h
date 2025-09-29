@@ -199,6 +199,18 @@ struct DrawQueueConditionMark : public DrawQueueCondition {
     Color m_color;
 };
 
+struct DrawQueueConditionComposition : public DrawQueueCondition {
+    DrawQueueConditionComposition(size_t start, size_t end, int mode) :
+        DrawQueueCondition(start, end), m_mode(mode)
+    {}
+
+    void start(DrawQueue* queue) override;
+    void end(DrawQueue* queue) override;
+
+    int m_mode;
+    int m_prevMode = 0;
+};
+
 class DrawQueue {
 public:
     DrawQueue() = default;
@@ -323,6 +335,12 @@ public:
     {
         if (start == m_queue.size()) return;
         m_conditions.push_back(new DrawQueueConditionMark(start, m_queue.size(), color));
+    }
+
+    void setCompositionMode(size_t start, int mode)
+    {
+        if (start == m_queue.size()) return;
+        m_conditions.push_back(new DrawQueueConditionComposition(start, m_queue.size(), mode));
     }
 
     void markMapPosition()
