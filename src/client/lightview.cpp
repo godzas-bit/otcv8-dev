@@ -36,9 +36,15 @@ void LightView::addLight(const Point& pos, uint8_t color, uint8_t intensity)
     m_lights.push_back(Light{ pos, color, intensity });
 }
 
-void LightView::setFieldBrightness(const Point& pos, size_t start, uint8_t color)
+void LightView::setFieldBrightness(const Point& tileIndex, size_t start, uint8_t color)
 {
-    size_t index = (pos.y / g_sprites.spriteSize()) * m_mapSize.width() + (pos.x / g_sprites.spriteSize());
+    if (tileIndex.x < 0 || tileIndex.y < 0)
+        return;
+
+    if (tileIndex.x >= m_mapSize.width() || tileIndex.y >= m_mapSize.height())
+        return;
+
+    size_t index = static_cast<size_t>(tileIndex.y) * m_mapSize.width() + static_cast<size_t>(tileIndex.x);
     if (index >= m_tiles.size()) return;
     m_tiles[index].start = start;
     m_tiles[index].color = color;

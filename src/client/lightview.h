@@ -48,7 +48,7 @@ public:
         return addLight(pos, light.color, light.intensity);
     }
     void addLight(const Point& pos, uint8_t color, uint8_t intensity);
-    void setFieldBrightness(const Point& pos, size_t start, uint8_t color);
+    void setFieldBrightness(const Point& tileIndex, size_t start, uint8_t color);
     size_t size() { return m_lights.size(); }
 
     void draw() override;

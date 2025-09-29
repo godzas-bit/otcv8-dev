@@ -113,6 +113,9 @@ public:
     void setFloorFading(int value) { m_floorFading = value; }
     void setCrosshair(const std::string& file);
 
+    void setZOffset(float offset) { m_zOffset = offset; }
+    float getZOffset() const { return m_zOffset; }
+
     //void setShader(const PainterShaderProgramPtr& shader, float fadein, float fadeout);
     //PainterShaderProgramPtr getShader() { return m_shader; }
 
@@ -166,6 +169,7 @@ private:
     float m_minimumAmbientLight;
     std::unique_ptr<LightView> m_lightView;
     TexturePtr m_lightTexture;
+    float m_zOffset = 0.f;
 };
 
 #endif
