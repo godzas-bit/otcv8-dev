@@ -44,6 +44,10 @@
 
 #include <framework/util/stats.h>
 #include <framework/util/extras.h>
+#include <framework/util/size.h>
+
+#include <algorithm>
+#include <cmath>
 
 std::array<double, Otc::LastSpeedFormula> Creature::m_speedFormula = { -1,-1,-1 };
 
@@ -101,6 +105,25 @@ void Creature::draw(const Point& dest, bool animate, LightView* lightView)
 
     if (m_outfit.getCategory() != ThingCategoryCreature)
         animationOffset -= getDisplacement();
+
+    const ThingTypePtr& type = rawGetThingType();
+    if (type && m_outfit.getCategory() == ThingCategoryCreature) {
+        const Point shadowBase = dest - jumpOffset + animationOffset - getDisplacement();
+        const int typeWidth = std::max(1, type->getWidth());
+        const int typeHeight = std::max(1, type->getHeight());
+        const float footprintWidth = static_cast<float>(typeWidth * sprSize);
+        const float footprintHeight = static_cast<float>(typeHeight * sprSize);
+        const float footprintTiles = static_cast<float>(std::max(typeWidth, typeHeight));
+        const float shadowWidth = footprintWidth * 0.9f;
+        const float shadowHeight = footprintHeight * (0.35f + 0.1f * (footprintTiles - 1.f));
+        const float opacity = std::clamp(0.45f + 0.15f * (footprintTiles - 1.f), 0.35f, 0.75f);
+        const int shadowAlpha = std::clamp<int>(static_cast<int>(std::round(opacity * 255.f)), 0, 255);
+        const PointF shadowCenter(shadowBase.x + footprintWidth / 2.f, shadowBase.y + footprintHeight / 2.f);
+
+        // Soft ground shadow ties the creature to the map; the shared ellipse scales and darkens with the footprint
+        // so bigger sprites cast broader, slightly stronger silhouettes without breaking batching.
+        g_drawQueue->addGroundShadow(shadowCenter, SizeF(shadowWidth, shadowHeight), Color(0, 0, 0, shadowAlpha));
+    }
 
     size_t drawQueueSize = g_drawQueue->size();
     m_outfit.draw(dest - jumpOffset + animationOffset, m_walking ? m_walkDirection : m_direction, m_walkAnimationPhase, true, lightView);

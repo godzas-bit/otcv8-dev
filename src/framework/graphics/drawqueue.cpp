@@ -1,4 +1,5 @@
 #include <stack>
+#include <cmath>
 #include <framework/graphics/drawqueue.h>
 #include <framework/graphics/painter.h>
 #include <framework/graphics/atlas.h>
@@ -12,6 +13,62 @@
 #include <client/outfit.h>
 
 std::shared_ptr<DrawQueue> g_drawQueue;
+
+namespace {
+constexpr int kShadowSegments = 24;
+constexpr float kShadowBaseRadius = 1024.f;
+constexpr float kShadowBaseDiameter = kShadowBaseRadius * 2.f;
+constexpr float kPi = 3.14159265358979323846f;
+
+std::shared_ptr<CoordsBuffer> createGroundShadowCoords()
+{
+    auto coords = std::make_shared<CoordsBuffer>();
+    const Point center(0, 0);
+    for (int i = 0; i < kShadowSegments; ++i) {
+        const float angle1 = (static_cast<float>(i) / kShadowSegments) * 2.f * kPi;
+        const float angle2 = (static_cast<float>(i + 1) / kShadowSegments) * 2.f * kPi;
+        const Point p1(static_cast<int>(std::lround(std::cos(angle1) * kShadowBaseRadius)),
+            static_cast<int>(std::lround(std::sin(angle1) * kShadowBaseRadius)));
+        const Point p2(static_cast<int>(std::lround(std::cos(angle2) * kShadowBaseRadius)),
+            static_cast<int>(std::lround(std::sin(angle2) * kShadowBaseRadius)));
+        coords->addTriangle(center, p1, p2);
+    }
+    coords->cache();
+    return coords;
+}
+
+const std::shared_ptr<CoordsBuffer>& groundShadowCoords()
+{
+    static const std::shared_ptr<CoordsBuffer> coords = createGroundShadowCoords();
+    return coords;
+}
+}
+
+DrawQueueItemGroundShadow::DrawQueueItemGroundShadow(const std::shared_ptr<CoordsBuffer>& coordsBuffer, const PointF& center, const SizeF& size, const Color& color)
+    : DrawQueueItem(nullptr, color),
+    m_coordsBuffer(coordsBuffer),
+    m_center(center),
+    m_size(size)
+{
+}
+
+void DrawQueueItemGroundShadow::draw()
+{
+    if (!m_coordsBuffer)
+        return;
+
+    const float scaleX = m_size.width() / kShadowBaseDiameter;
+    const float scaleY = m_size.height() / kShadowBaseDiameter;
+    if (scaleX <= 0.f || scaleY <= 0.f)
+        return;
+
+    g_painter->pushTransformMatrix();
+    g_painter->scale(scaleX, scaleY);
+    g_painter->translate(m_center.x, m_center.y);
+    g_painter->setColor(m_color);
+    g_painter->drawFillCoords(*m_coordsBuffer);
+    g_painter->popTransformMatrix();
+}
 
 void DrawQueueItemTextureCoords::draw()
 {
@@ -193,6 +250,14 @@ void DrawQueueConditionMark::end(DrawQueue* queue)
             g_painter->drawTexturedRect(texture->m_dest, texture->m_texture, texture->m_src);
     }
     g_painter->resetShaderProgram();
+}
+
+void DrawQueue::addGroundShadow(const PointF& center, const SizeF& size, const Color& color)
+{
+    if (size.width() <= 0.f || size.height() <= 0.f)
+        return;
+
+    m_queue.push_back(new DrawQueueItemGroundShadow(groundShadowCoords(), center, size, color));
 }
 
 void DrawQueue::setFrameBuffer(const Rect& dest, const Size& size, const Rect& src)
