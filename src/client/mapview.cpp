@@ -47,6 +47,9 @@
 
 #include <framework/util/extras.h>
 #include <framework/core/adaptiverenderer.h>
+#include <cmath>
+
+#include <algorithm>
 
 #include <algorithm>
 #include <cmath>
@@ -58,6 +61,7 @@ MapView::MapView()
     m_cachedLastVisibleFloor = 7;
     m_minimumAmbientLight = 0;
     m_optimizedSize = Size(g_map.getAwareRange().horizontal(), g_map.getAwareRange().vertical()) * g_sprites.spriteSize();
+    m_zOffset = g_sprites.spriteSize() / 2.f;
 
     setVisibleDimension(Size(15, 11));
 }
@@ -165,26 +169,44 @@ void MapView::drawFloor(short floor, const Position& cameraPosition, const TileP
     auto& tiles = m_cachedVisibleTiles[floor];
     size_t lightFloorStart = m_lightView ? m_lightView->size() : 0;
 
+    std::vector<std::pair<TilePtr, Point>> drawList;
+    drawList.reserve(tiles.size());
+    for (auto& tile : tiles) {
+        drawList.emplace_back(tile, transformPositionTo2D(tile->getPosition(), cameraPosition));
+    }
+
+    // Sort tiles by projected screen-space Y so the isometric pipeline draws lower tiles last.
+    std::stable_sort(drawList.begin(), drawList.end(), [](const auto& a, const auto& b) {
+        return a.second.y < b.second.y;
+    });
+
     // light
     if (m_lightView) {
-        for (auto& tile : tiles) {
-            Point tileDrawPos = transformPositionTo2D(tile->getPosition(), cameraPosition);
+
+        for (const auto& entry : drawList) {
+            const TilePtr& tile = entry.first;
+            const Point& tileDrawPos = entry.second;
             ItemPtr ground = tile->getGround();
             if (ground && ground->isGround() && !ground->isTranslucent()) {
-                m_lightView->setFieldBrightness(tileDrawPos, lightFloorStart, 0);
+                const Point tileIndex(
+                    m_virtualCenterOffset.x + (tilePosition.x - cameraPosition.x),
+                    m_virtualCenterOffset.y + (tilePosition.y - cameraPosition.y));
+                m_lightView->setFieldBrightness(tileIndex, lightFloorStart, 0);
             }
         }
     }
 
     if (g_game.getFeature(Otc::GameMapDrawGroundFirst)) {
         // ground
-        for (auto& tile : tiles) {
-            Point tileDrawPos = transformPositionTo2D(tile->getPosition(), cameraPosition);
+        for (const auto& entry : drawList) {
+            const TilePtr& tile = entry.first;
+            const Point& tileDrawPos = entry.second;
             tile->drawGround(tileDrawPos, m_lightView.get());
         }
         // bottom, creatures, top
-        for (auto& tile : tiles) {
-            Point tileDrawPos = transformPositionTo2D(tile->getPosition(), cameraPosition);
+        for (const auto& entry : drawList) {
+            const TilePtr& tile = entry.first;
+            const Point& tileDrawPos = entry.second;
 
             tile->drawBottom(tileDrawPos, m_lightView.get());
 
@@ -198,13 +220,17 @@ void MapView::drawFloor(short floor, const Position& cameraPosition, const TileP
         }
     } else {
         // ground, bottom, creatures, top
-        for (auto& tile : tiles) {
-            Point tileDrawPos = transformPositionTo2D(tile->getPosition(), cameraPosition);
+        for (const auto& entry : drawList) {
+            const TilePtr& tile = entry.first;
+            const Point& tileDrawPos = entry.second;
 
             if (m_lightView) {
                 ItemPtr ground = tile->getGround();
                 if (ground && ground->isGround() && !ground->isTranslucent()) {
-                    m_lightView->setFieldBrightness(tileDrawPos, lightFloorStart, 0);
+                    const Point tileIndex(
+                        m_virtualCenterOffset.x + (tilePosition.x - cameraPosition.x),
+                        m_virtualCenterOffset.y + (tilePosition.y - cameraPosition.y));
+                    m_lightView->setFieldBrightness(tileIndex, lightFloorStart, 0);
                 }
             }
 
@@ -259,6 +285,11 @@ void MapView::drawMapForeground(const Rect& rect)
         p += rect.topLeft();
         creatures.push_back(std::make_pair(creature, p));
     }
+
+    // Sort by screen-space Y so the isometric pipeline respects creature depth against terrain.
+    std::stable_sort(creatures.begin(), creatures.end(), [](const auto& a, const auto& b) {
+        return a.second.y < b.second.y;
+    });
 
     for (auto& c : creatures) {
         int flags = Otc::DrawIcons;
@@ -697,8 +728,36 @@ int MapView::calcLastVisibleFloor()
 }
 
 Point MapView::transformPositionTo2D(const Position& position, const Position& relativePosition) {
-    return Point((m_virtualCenterOffset.x + (position.x - relativePosition.x) - (relativePosition.z - position.z)) * g_sprites.spriteSize(),
-        (m_virtualCenterOffset.y + (position.y - relativePosition.y) - (relativePosition.z - position.z)) * g_sprites.spriteSize());
+    const float tileWidth = static_cast<float>(g_sprites.spriteSize());
+    const float tileHeight = static_cast<float>(g_sprites.spriteSize());
+    const float halfTileWidth = tileWidth / 2.f;
+    const float halfTileHeight = tileHeight / 2.f;
+
+    const float dx = static_cast<float>(position.x - relativePosition.x);
+    const float dy = static_cast<float>(position.y - relativePosition.y);
+    const float dz = static_cast<float>(position.z - relativePosition.z);
+
+    // Convert the camera-relative tile position into isometric coordinates. The virtual
+    // center keeps the camera tile anchored while `(x - y)` and `(x + y)` project the
+    // cartesian grid onto an isometric diamond.
+    const float virtualX = static_cast<float>(m_virtualCenterOffset.x) + dx;
+    const float virtualY = static_cast<float>(m_virtualCenterOffset.y) + dy;
+
+    const float isoX = (virtualX - virtualY) * halfTileWidth;
+    const float isoY = (virtualX + virtualY) * halfTileHeight;
+
+    const float centerIsoX = (static_cast<float>(m_virtualCenterOffset.x) - static_cast<float>(m_virtualCenterOffset.y)) * halfTileWidth;
+    const float centerIsoY = (static_cast<float>(m_virtualCenterOffset.x) + static_cast<float>(m_virtualCenterOffset.y)) * halfTileHeight;
+
+    float screenX = isoX - centerIsoX + static_cast<float>(m_virtualCenterOffset.x) * tileWidth;
+    float screenY = isoY - centerIsoY + static_cast<float>(m_virtualCenterOffset.y) * tileHeight;
+
+    // Shift from the diamond center so the sprite origin lines up with our 2D coordinates
+    // and pull deeper floors upward in screen space using the configurable vertical z-offset.
+    screenX -= halfTileWidth;
+    screenY -= dz * m_zOffset;
+
+    return Point(static_cast<int>(std::lround(screenX)), static_cast<int>(std::lround(screenY)));
 }
 
 

@@ -2,6 +2,7 @@
 #define DRAWQUEUE_H
 
 #include <vector>
+#include <memory>
 #include <framework/graphics/declarations.h>
 #include <framework/graphics/coordsbuffer.h>
 #include <framework/graphics/paintershaderprogram.h>
@@ -9,6 +10,8 @@
 #include <framework/graphics/colorarray.h>
 #include <framework/graphics/deptharray.h>
 #include <framework/ui/uiwidget.h>
+#include <framework/util/point.h>
+#include <framework/util/size.h>
 
 class DrawQueue;
 struct DrawQueueItem;
@@ -106,6 +109,16 @@ struct DrawQueueItemFillCoords : public DrawQueueItem {
     bool cache();
 
     CoordsBuffer m_coordsBuffer;
+};
+
+struct DrawQueueItemGroundShadow : public DrawQueueItem {
+    DrawQueueItemGroundShadow(const std::shared_ptr<CoordsBuffer>& coordsBuffer, const PointF& center, const SizeF& size, const Color& color);
+
+    void draw() override;
+
+    std::shared_ptr<CoordsBuffer> m_coordsBuffer;
+    PointF m_center;
+    SizeF m_size;
 };
 
 struct DrawQueueItemText : public DrawQueueItem {
@@ -241,6 +254,7 @@ public:
     {
         m_queue.push_back(new DrawQueueItemFillCoords(coords, color));
     }
+    void addGroundShadow(const PointF& center, const SizeF& size, const Color& color = Color::white);
     void addClearRect(const Rect& dest, const Color& color = Color::white)
     {
         m_queue.push_back(new DrawQueueItemClearRect(dest, color));
