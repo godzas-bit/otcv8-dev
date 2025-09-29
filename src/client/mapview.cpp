@@ -42,9 +42,14 @@
 #include <framework/graphics/texturemanager.h>
 #include <framework/graphics/atlas.h>
 #include <framework/graphics/shadermanager.h>
+#include <framework/graphics/painter.h>
+#include <framework/graphics/color.h>
 
 #include <framework/util/extras.h>
 #include <framework/core/adaptiverenderer.h>
+
+#include <algorithm>
+#include <cmath>
 
 MapView::MapView()
 {
@@ -235,6 +240,9 @@ void MapView::drawMapForeground(const Rect& rect)
     float horizontalStretchFactor = rect.width() / (float)srcRect.width();
     float verticalStretchFactor = rect.height() / (float)srcRect.height();
 
+    // Generate the radial light mask lazily so we only pay the cost once per session.
+    ensureLightMaskTexture();
+
     // creatures
     std::vector<std::pair<CreaturePtr, Point>> creatures;
     for (const CreaturePtr& creature : g_map.getSpectatorsInRangeEx(cameraPosition, false, m_visibleDimension.width() / 2, m_visibleDimension.width() / 2 + 1, m_visibleDimension.height() / 2, m_visibleDimension.height() / 2 + 1)) {
@@ -264,6 +272,31 @@ void MapView::drawMapForeground(const Rect& rect)
 
     if (m_lightView) {
         g_drawQueue->add(m_lightView.release());
+    }
+
+    if (m_lightMaskTexture) {
+        const LocalPlayerPtr& localPlayer = g_game.getLocalPlayer();
+        if (localPlayer) {
+            const Position& playerPosition = localPlayer->getPosition();
+            if (playerPosition.isValid()) {
+                // Project the player's isometric position into screen space so the vignette follows them.
+                Point maskCenter = transformPositionTo2D(playerPosition, cameraPosition) - drawOffset;
+                maskCenter += Point(g_sprites.spriteSize() / 2, g_sprites.spriteSize() / 2);
+                maskCenter.x *= horizontalStretchFactor;
+                maskCenter.y *= verticalStretchFactor;
+                maskCenter += rect.topLeft();
+
+                const Size maskSize = rect.size();
+                const Point maskTopLeft = Point(maskCenter.x - maskSize.width() / 2, maskCenter.y - maskSize.height() / 2);
+                const Rect maskDest(maskTopLeft, maskSize);
+                const Rect maskSrc(Point(0, 0), m_lightMaskTexture->getSize());
+
+                const size_t maskStart = g_drawQueue->size();
+                g_drawQueue->addTexturedRect(maskDest, m_lightMaskTexture, maskSrc);
+                // Darken the scene using multiply blending, then restore the previous blend state automatically.
+                g_drawQueue->setCompositionMode(maskStart, Painter::CompositionMode_Multiply);
+            }
+        }
     }
 
     // texts
@@ -390,6 +423,37 @@ void MapView::updateVisibleTilesCache()
             }
         }
     }
+}
+
+void MapView::ensureLightMaskTexture()
+{
+    if (m_lightMaskTexture)
+        return;
+
+    // Build a small radial gradient where the center remains bright and the edges fall to black.
+    constexpr int maskDimension = 256;
+    const Size maskSize(maskDimension, maskDimension);
+    ImagePtr maskImage(new Image(maskSize));
+    const Point center(maskDimension / 2, maskDimension / 2);
+    const float radius = static_cast<float>(maskDimension) / 2.f;
+
+    for (int y = 0; y < maskDimension; ++y) {
+        for (int x = 0; x < maskDimension; ++x) {
+            const float dx = static_cast<float>(x - center.x);
+            const float dy = static_cast<float>(y - center.y);
+            const float distance = std::sqrt(dx * dx + dy * dy);
+            const float normalized = std::min(distance / radius, 1.f);
+            const float falloff = std::pow(1.f - normalized, 2.f);
+            const float clampedFalloff = std::max(0.f, std::min(1.f, falloff));
+            const uint8_t intensity = static_cast<uint8_t>(clampedFalloff * 255.f + 0.5f);
+            maskImage->setPixel(x, y, Color(intensity, intensity, intensity, 255));
+        }
+    }
+
+    m_lightMaskTexture = TexturePtr(new Texture(maskImage, false, false, true));
+    m_lightMaskTexture->setSmooth(true);
+    // The vignette stretches across the screen, so skip atlas caching to avoid resampling artifacts.
+    m_lightMaskTexture->setCanCache(false);
 }
 
 void MapView::updateGeometry(const Size& visibleDimension, const Size& optimizedSize)

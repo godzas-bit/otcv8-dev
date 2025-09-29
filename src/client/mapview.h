@@ -46,6 +46,7 @@ private:
     void updateGeometry(const Size& visibleDimension, const Size& optimizedSize);
     void updateVisibleTilesCache();
     void requestVisibleTilesCacheUpdate() { m_mustUpdateVisibleTilesCache = true; }
+    void ensureLightMaskTexture();
 
 protected:
     void onTileUpdate(const Position& pos);
@@ -166,6 +167,7 @@ private:
     float m_minimumAmbientLight;
     std::unique_ptr<LightView> m_lightView;
     TexturePtr m_lightTexture;
+    TexturePtr m_lightMaskTexture;
 };
 
 #endif
